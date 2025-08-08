@@ -1,0 +1,137 @@
+from urlextract import URLExtract
+from wordcloud import WordCloud
+import pandas as pd
+from collections import Counter
+from googletrans import Translator
+from transformers import pipeline
+
+CUSTOM_STOP_WORDS = ['hai', 'toh', 'in', 'a', 'the', 'is', 'and', 'of', 'to','se','main','ke','hu','bhi','ko','ka','he','ho','pe','ki','aur']  # Add more words as needed
+
+extract = URLExtract()
+
+def fetch_stats(selected_user, df):
+    if selected_user != 'Overall':
+        df = df[df['user'] == selected_user]
+
+    num_messages = df.shape[0]
+
+
+    words = []
+    for message in df['message']:
+        words.extend(message.split())
+
+        # fetch number of media messages
+    num_media_messages = df[df['message'] == '<Media omitted>\n'].shape[0]
+
+    links=[]
+    for message in df['message']:
+        links.extend(extract.find_urls(message))
+
+    return num_messages,len(words),num_media_messages,len(links)
+
+def most_busy_users(df):
+    x = df['user'].value_counts().head()
+    return x,df
+
+from wordcloud import WordCloud, STOPWORDS
+
+def create_wordcloud(selected_user, df):
+    # If a specific user is selected, filter the dataframe by the user
+    if selected_user != 'Overall':
+        df = df[df['user'] == selected_user]
+
+    # Remove the term '<Media omitted>\n' from the messages
+    df['message'] = df['message'].str.replace('<Media omitted>\n', '', regex=False)
+
+    # Define custom stopwords
+    custom_stopwords = set(STOPWORDS)
+    custom_stopwords.update(['hai', 'ok', 'na', 'Media omitted'])  # Add custom stop words
+
+    # Create the word cloud object with stopwords
+    wc = WordCloud(width=500, height=500, min_font_size=10, background_color='white', stopwords=custom_stopwords)
+
+    # Generate the word cloud by concatenating all messages
+    df_wc = wc.generate(df['message'].str.cat(sep=" "))
+
+    return df_wc
+
+def most_common_words(selected_user, df):
+    # Filter the data for the selected user (or 'Overall' to keep all)
+    if selected_user != 'Overall':
+        df = df[df['user'] == selected_user]
+
+    # Join all messages into a single string
+    all_words = ' '.join(df['message'])
+
+    # Tokenize and count words
+    words = all_words.split()
+
+    # Remove custom stop words
+    filtered_words = [word for word in words if word.lower() not in CUSTOM_STOP_WORDS]
+
+    # Count word frequencies
+    word_counts = Counter(filtered_words)
+
+    # Return most common words as a DataFrame
+    most_common_df = pd.DataFrame(word_counts.most_common(20), columns=['word', 'count'])
+
+    return most_common_df
+
+
+# Load pre-trained emotion analysis model once
+emotion_classifier = pipeline('text-classification', model='j-hartmann/emotion-english-distilroberta-base')
+
+# Initialize the translator
+translator = Translator()
+
+
+def translate_message(msg):
+    try:
+        # Translate the message to English
+        translated = translator.translate(msg).text
+        return translated
+    except Exception as e:
+        # If translation fails, return the original message
+        return msg
+
+
+def analyze_emotions(selected_user, df):
+    # Filter the DataFrame by the selected user (if not 'Overall')
+    if selected_user != 'Overall':
+        df = df[df['user'] == selected_user]
+
+    # Translate messages to English before applying the emotion classifier
+    df['translated_message'] = df['message'].apply(translate_message)
+
+    # Apply emotion classification on the translated messages
+    df['emotion'] = df['translated_message'].apply(
+        lambda msg: emotion_classifier(msg)[0]['label'] if len(msg.strip()) > 0 and msg != '<Media omitted>\n' else None
+    )
+
+    # Count the occurrence of each emotion
+    emotion_counts = df['emotion'].value_counts()
+
+    return emotion_counts
+
+#monthly timeline
+
+def monthly_timeline(selected_user,df):
+
+    if selected_user != 'Overall':
+        df = df[df['user'] == selected_user]
+
+    timeline = df.groupby(['year', 'month_num', 'month']).count()['message'].reset_index()
+
+    time = []
+    for i in range(timeline.shape[0]):
+        time.append(timeline['month'][i] + "-" + str(timeline['year'][i]))
+
+    timeline['time'] = time
+
+    return timeline
+
+
+
+
+
+
